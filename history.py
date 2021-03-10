@@ -1,5 +1,6 @@
 import pandas as pd
 import random
+from multiprocessing import Pool
 
 
 class History:
@@ -12,9 +13,14 @@ class History:
         # settings
         self.sequence_len = 500
         self.MAX_INT = 9223372036854775807
+        self.processor_num = 8
 
     def set_history(self, sequence, score):
-        if self.is_it_dupe_sequence(sequence):
+        split_scope = self.split_history(self.processor_num)
+        self.last_sequence = sequence
+        with Pool(self.processor_num) as p:
+            dupe_flags = p.map(self.is_it_dupe_sequence, split_scope)
+        if any(dupe_flags):
             self.dupe_count += 1
             if score > self.score:
                 self.score = score
@@ -22,10 +28,11 @@ class History:
             self.history_arr = self.history_arr.append(sequence)
             self.history_len += len(sequence)
 
-    def is_it_dupe_sequence(self, sequence):
-        inter_points = self.history_arr[self.history_arr == sequence.values[0]]
+    def is_it_dupe_sequence(self, split_scope):
+        history_part = self.history_arr[split_scope[0]:split_scope[1]]
+        inter_points = history_part[self.history_arr == self.last_sequence.values[0]]
         for inter_point in inter_points.index:
-            equal_result = sequence.equals(self.history_arr[inter_point:inter_point+500])
+            equal_result = self.last_sequence.equals(history_part[inter_point:inter_point + 500])
             if equal_result:
                 return True
         return False
@@ -35,6 +42,23 @@ class History:
 
     def load_history(self, filepath):
         self.history_arr = pd.read_pickle(f"{filepath}.pkl")
+        self.history_len = len(self.history_arr)
+
+    def split_history(self, processor_num):
+        history_part = self.history_len // processor_num
+        scopes = list()
+        for i in range(1, processor_num+1):
+            if i == 1:
+                left = 0
+            else:
+                left = history_part * (i - 1) - 499 - processor_num
+
+            if i == processor_num:
+                right = self.history_len
+            else:
+                right = history_part * i + 499 + processor_num
+            scopes.append((left, right))
+        return scopes
 
 
 class ExtendHistory(History):
@@ -52,7 +76,6 @@ class ExtendHistory(History):
             target = 3
         return size, target
 
-
     def random_sequence_and_score(self):
         return pd.Series([random.randint(0, self.MAX_INT) for _ in range(self.sequence_len)],
                          index=range(self.history_len, self.history_len + self.sequence_len)), random.random()
@@ -64,4 +87,6 @@ class ExtendHistory(History):
         self.set_history(*self.random_sequence_and_score())
 
 
-
+if __name__ == "__main__":
+    history = ExtendHistory()
+    history.load_history('first_save')
